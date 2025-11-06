@@ -34,7 +34,7 @@ async function extractResearchAreas(jobDescription: string): Promise<ResearchAre
     messages: [
       {
         role: 'system',
-        content: 'You are an expert at analyzing job descriptions and extracting key research areas. Extract 3-5 specific research terms or areas that would be relevant for finding researchers. Return as JSON array with format: [{"term": "machine learning", "importance": "high"}, ...]',
+        content: 'You are an expert at analyzing job descriptions and extracting key research areas. Extract 3-5 specific research terms or areas that would be relevant for finding researchers. Return ONLY a JSON object with an "areas" array. Format: {"areas": [{"term": "machine learning", "importance": "high"}, {"term": "deep learning", "importance": "high"}]}',
       },
       {
         role: 'user',
@@ -45,19 +45,29 @@ async function extractResearchAreas(jobDescription: string): Promise<ResearchAre
   });
 
   const result = JSON.parse(completion.choices[0].message.content || '{}');
+  console.log('Extracted research areas:', result);
   return result.areas || [];
 }
 
 // Step 2: Search arXiv for papers using research terms
 async function searchArxivPapers(researchAreas: ResearchArea[]): Promise<ArxivPaper[]> {
-  const searchTerms = researchAreas.map(area => area.term).join(' OR ');
-  const encodedQuery = encodeURIComponent(searchTerms);
+  // Build search query - search in title and abstract
+  const searchParts = researchAreas.map(area => {
+    const term = area.term.replace(/[()]/g, ''); // Remove special chars
+    return `(ti:${term} OR abs:${term})`;
+  });
+  const searchQuery = searchParts.join(' OR ');
+  const encodedQuery = encodeURIComponent(searchQuery);
 
   // Search arXiv API - get 50 recent papers to have enough to score
-  const url = `http://export.arxiv.org/api/query?search_query=all:${encodedQuery}&start=0&max_results=50&sortBy=lastUpdatedDate&sortOrder=descending`;
+  const url = `http://export.arxiv.org/api/query?search_query=${encodedQuery}&start=0&max_results=50&sortBy=submittedDate&sortOrder=descending`;
+
+  console.log('arXiv search URL:', url);
 
   const response = await fetch(url);
   const xmlData = await response.text();
+
+  console.log('arXiv response length:', xmlData.length);
 
   const parser = new XMLParser({
     ignoreAttributes: false,
@@ -65,7 +75,16 @@ async function searchArxivPapers(researchAreas: ResearchArea[]): Promise<ArxivPa
   });
 
   const result = parser.parse(xmlData);
+
+  // Check if we got any results
+  if (!result.feed || !result.feed.entry) {
+    console.log('No entries found in arXiv response');
+    console.log('Feed data:', JSON.stringify(result.feed, null, 2));
+    return [];
+  }
+
   const entries = Array.isArray(result.feed.entry) ? result.feed.entry : [result.feed.entry];
+  console.log(`Found ${entries.length} papers from arXiv`);
 
   return entries
     .filter((entry: any) => entry && entry.title)
