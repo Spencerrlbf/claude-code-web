@@ -152,6 +152,8 @@ Return as JSON: {"score": 85, "reason": "..."}`,
 
 // Main API handler
 export async function POST(request: NextRequest) {
+  const debugLog: string[] = [];
+
   try {
     const { jobDescription } = await request.json();
 
@@ -162,32 +164,66 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    debugLog.push(`📝 Received job description (${jobDescription.length} characters)`);
+
     // Step 1: Extract research areas
-    console.log('Step 1: Extracting research areas...');
+    debugLog.push('🔍 Step 1: Extracting research areas from job description...');
     const researchAreas = await extractResearchAreas(jobDescription);
+    debugLog.push(`✓ Extracted ${researchAreas.length} research areas: ${researchAreas.map(a => a.term).join(', ')}`);
     console.log('Research areas:', researchAreas);
 
+    if (researchAreas.length === 0) {
+      debugLog.push('⚠️  WARNING: No research areas extracted! Cannot search arXiv.');
+      return NextResponse.json({
+        researchAreas: [],
+        researchers: [],
+        totalPapersAnalyzed: 0,
+        debug: debugLog,
+        error: 'No research areas could be extracted from the job description',
+      });
+    }
+
     // Step 2: Search arXiv papers
-    console.log('Step 2: Searching arXiv papers...');
+    debugLog.push('📚 Step 2: Searching arXiv for relevant papers...');
     const papers = await searchArxivPapers(researchAreas);
+    debugLog.push(`✓ Found ${papers.length} papers from arXiv`);
     console.log(`Found ${papers.length} papers`);
 
+    if (papers.length === 0) {
+      debugLog.push('⚠️  WARNING: No papers found on arXiv matching those research areas.');
+      return NextResponse.json({
+        researchAreas,
+        researchers: [],
+        totalPapersAnalyzed: 0,
+        debug: debugLog,
+        error: 'No papers found on arXiv for the extracted research areas',
+      });
+    }
+
     // Step 3: Score and rank papers
-    console.log('Step 3: Scoring and ranking papers...');
+    debugLog.push(`🤖 Step 3: Scoring ${papers.length} papers with AI (this may take 1-2 minutes)...`);
     const topResearchers = await scoreAndRankPapers(papers, jobDescription, researchAreas);
+    debugLog.push(`✓ Scored all papers, selected top ${topResearchers.length} researchers`);
     console.log(`Scored ${topResearchers.length} researchers`);
 
     // Step 4: Return results
+    debugLog.push('✅ Complete! Returning results.');
     return NextResponse.json({
       researchAreas,
       researchers: topResearchers,
       totalPapersAnalyzed: papers.length,
+      debug: debugLog,
     });
 
   } catch (error) {
     console.error('Error in find-researchers API:', error);
+    debugLog.push(`❌ ERROR: ${error instanceof Error ? error.message : 'Unknown error'}`);
     return NextResponse.json(
-      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
+      {
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error',
+        debug: debugLog,
+      },
       { status: 500 }
     );
   }

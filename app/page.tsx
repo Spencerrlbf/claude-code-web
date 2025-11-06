@@ -27,6 +27,8 @@ interface ApiResponse {
   researchAreas: ResearchArea[];
   researchers: ScoredResearcher[];
   totalPapersAnalyzed: number;
+  debug?: string[];
+  error?: string;
 }
 
 export default function Home() {
@@ -63,6 +65,11 @@ export default function Home() {
 
       const data = await response.json();
       setResults(data);
+
+      // If API returned an error message but still gave us debug info
+      if (data.error) {
+        setError(data.error);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -119,6 +126,20 @@ export default function Home() {
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
             <p className="mt-4 text-gray-600">Analyzing papers and scoring researchers...</p>
+          </div>
+        )}
+
+        {/* Debug Log */}
+        {results?.debug && results.debug.length > 0 && (
+          <div className="bg-gray-900 rounded-lg shadow-lg p-6 mb-8 font-mono text-sm">
+            <h3 className="text-lg font-bold text-green-400 mb-4">📊 Processing Log</h3>
+            <div className="space-y-2">
+              {results.debug.map((log, idx) => (
+                <div key={idx} className="text-gray-300">
+                  {log}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
