@@ -16,19 +16,52 @@ interface ArxivPaper {
   link: string;
 }
 
-interface ScoredResearcher {
+interface TopResearcher {
   name: string;
-  paper: ArxivPaper;
-  relevanceScore: number;
+  similarityScore: number;
+  aiRelevanceScore: number;
   fitReason: string;
+  location: 'USA' | 'International' | 'Unknown';
+  affiliation?: string;
+  paper: ArxivPaper;
+}
+
+interface AdditionalCandidate {
+  name: string;
+  similarityScore: number;
+  location: 'USA' | 'International' | 'Unknown';
+  affiliation?: string;
+  paper: ArxivPaper;
 }
 
 interface ApiResponse {
   researchAreas: ResearchArea[];
-  researchers: ScoredResearcher[];
+  topResearchers: TopResearcher[];
+  additionalCandidates: AdditionalCandidate[];
   totalPapersAnalyzed: number;
   debug?: string[];
   error?: string;
+}
+
+// Location badge component
+function LocationBadge({ location }: { location: 'USA' | 'International' | 'Unknown' }) {
+  const styles = {
+    USA: 'bg-blue-100 text-blue-800 border-blue-300',
+    International: 'bg-purple-100 text-purple-800 border-purple-300',
+    Unknown: 'bg-gray-100 text-gray-600 border-gray-300',
+  };
+
+  const icons = {
+    USA: '🇺🇸',
+    International: '🌍',
+    Unknown: '❓',
+  };
+
+  return (
+    <span className={`px-2 py-1 rounded-full text-xs font-medium border ${styles[location]}`}>
+      {icons[location]} {location}
+    </span>
+  );
 }
 
 export default function Home() {
@@ -86,7 +119,7 @@ export default function Home() {
             AI Researcher Finder
           </h1>
           <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-            Find the perfect researchers for your position. Paste a job description and we'll analyze arXiv papers to match you with top talent.
+            Find the perfect researchers for your position. Using AI embeddings to semantically match job descriptions with arXiv papers.
           </p>
         </div>
 
@@ -125,7 +158,11 @@ export default function Home() {
         {loading && (
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-            <p className="mt-4 text-gray-600">Analyzing papers and scoring researchers...</p>
+            <p className="mt-4 text-gray-600">
+              Analyzing papers with AI embeddings and scoring researchers...
+              <br />
+              <span className="text-sm text-gray-500">This may take 1-2 minutes</span>
+            </p>
           </div>
         )}
 
@@ -168,69 +205,132 @@ export default function Home() {
                 ))}
               </div>
               <p className="mt-4 text-sm text-gray-500">
-                Analyzed {results.totalPapersAnalyzed} papers from arXiv
+                Analyzed {results.totalPapersAnalyzed} papers from arXiv using semantic similarity
               </p>
             </div>
 
-            {/* Top Researchers */}
-            <div>
-              <h2 className="text-3xl font-bold text-gray-900 mb-6">
-                Top 10 Researchers
-              </h2>
-              <div className="space-y-6">
-                {results.researchers.map((researcher, idx) => (
-                  <div
-                    key={idx}
-                    className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition duration-200"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className="text-2xl font-bold text-indigo-600">
-                            #{idx + 1}
-                          </span>
-                          <h3 className="text-xl font-bold text-gray-900">
-                            {researcher.name}
-                          </h3>
-                        </div>
-                        <div className="flex items-center gap-2 mb-3">
-                          <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold">
-                            {researcher.relevanceScore}% Match
-                          </span>
+            {/* Top 10 Researchers */}
+            {results.topResearchers.length > 0 && (
+              <div>
+                <h2 className="text-3xl font-bold text-gray-900 mb-6">
+                  🏆 Top 10 Researchers
+                </h2>
+                <div className="space-y-6">
+                  {results.topResearchers.map((researcher, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition duration-200 border-l-4 border-indigo-500"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="text-2xl font-bold text-indigo-600">
+                              #{idx + 1}
+                            </span>
+                            <h3 className="text-xl font-bold text-gray-900">
+                              {researcher.name}
+                            </h3>
+                          </div>
+                          <div className="flex items-center gap-2 mb-3 flex-wrap">
+                            <LocationBadge location={researcher.location} />
+                            {researcher.affiliation && (
+                              <span className="text-sm text-gray-600">
+                                {researcher.affiliation}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold">
+                              {researcher.similarityScore}% Similarity
+                            </span>
+                            <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-semibold">
+                              {researcher.aiRelevanceScore}/100 AI Score
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="mb-4 p-4 bg-blue-50 rounded-lg border-l-4 border-indigo-500">
-                      <p className="text-sm font-semibold text-gray-700 mb-1">
-                        Why they're a good fit:
-                      </p>
-                      <p className="text-gray-700">{researcher.fitReason}</p>
-                    </div>
+                      <div className="mb-4 p-4 bg-blue-50 rounded-lg border-l-4 border-indigo-500">
+                        <p className="text-sm font-semibold text-gray-700 mb-1">
+                          Why they're a good fit:
+                        </p>
+                        <p className="text-gray-700">{researcher.fitReason}</p>
+                      </div>
 
-                    <div className="border-t pt-4">
-                      <h4 className="font-semibold text-gray-900 mb-2">
-                        Recent Paper:
-                      </h4>
-                      <a
-                        href={researcher.paper.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-indigo-600 hover:text-indigo-800 font-medium hover:underline"
-                      >
-                        {researcher.paper.title}
-                      </a>
-                      <p className="text-sm text-gray-500 mt-2">
-                        Co-authors: {researcher.paper.authors.slice(1).join(', ') || 'Solo author'}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        Published: {new Date(researcher.paper.published).toLocaleDateString()}
-                      </p>
+                      <div className="border-t pt-4">
+                        <h4 className="font-semibold text-gray-900 mb-2">
+                          Recent Paper:
+                        </h4>
+                        <a
+                          href={researcher.paper.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-600 hover:text-indigo-800 font-medium hover:underline"
+                        >
+                          {researcher.paper.title}
+                        </a>
+                        <p className="text-sm text-gray-500 mt-2">
+                          Co-authors: {researcher.paper.authors.slice(1).join(', ') || 'Solo author'}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          Published: {new Date(researcher.paper.published).toLocaleDateString()}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Additional Candidates */}
+            {results.additionalCandidates.length > 0 && (
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-4">
+                  📋 Additional Candidates
+                </h2>
+                <p className="text-gray-600 mb-4">
+                  More researchers with relevant papers (no AI analysis to save costs)
+                </p>
+                <div className="grid md:grid-cols-2 gap-4">
+                  {results.additionalCandidates.map((candidate, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-white rounded-lg shadow p-4 hover:shadow-md transition duration-200"
+                    >
+                      <div className="mb-2">
+                        <h3 className="text-lg font-bold text-gray-900">
+                          {candidate.name}
+                        </h3>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <LocationBadge location={candidate.location} />
+                          <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium">
+                            {candidate.similarityScore}% Match
+                          </span>
+                        </div>
+                        {candidate.affiliation && (
+                          <p className="text-sm text-gray-600 mt-1">
+                            {candidate.affiliation}
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-sm">
+                        <a
+                          href={candidate.paper.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-600 hover:text-indigo-800 font-medium hover:underline"
+                        >
+                          {candidate.paper.title}
+                        </a>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {new Date(candidate.paper.published).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -243,36 +343,36 @@ export default function Home() {
                 <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl mx-auto mb-3">
                   1
                 </div>
-                <h3 className="font-semibold text-gray-900 mb-2">Paste Job Description</h3>
+                <h3 className="font-semibold text-gray-900 mb-2">AI Embedding</h3>
                 <p className="text-sm text-gray-600">
-                  Enter your job posting or research position description
+                  Create semantic embedding of your job description using OpenAI
                 </p>
               </div>
               <div className="text-center">
                 <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl mx-auto mb-3">
                   2
                 </div>
-                <h3 className="font-semibold text-gray-900 mb-2">Extract Research Areas</h3>
+                <h3 className="font-semibold text-gray-900 mb-2">Search 100+ Papers</h3>
                 <p className="text-sm text-gray-600">
-                  AI identifies key research topics and technical areas
+                  Find recent arXiv papers and compute similarity with your JD
                 </p>
               </div>
               <div className="text-center">
                 <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl mx-auto mb-3">
                   3
                 </div>
-                <h3 className="font-semibold text-gray-900 mb-2">Search arXiv Papers</h3>
+                <h3 className="font-semibold text-gray-900 mb-2">Check Location</h3>
                 <p className="text-sm text-gray-600">
-                  Find recent publications matching those research areas
+                  Verify author affiliations via Semantic Scholar API
                 </p>
               </div>
               <div className="text-center">
                 <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl mx-auto mb-3">
                   4
                 </div>
-                <h3 className="font-semibold text-gray-900 mb-2">Score & Rank</h3>
+                <h3 className="font-semibold text-gray-900 mb-2">AI Analysis</h3>
                 <p className="text-sm text-gray-600">
-                  AI evaluates fit and generates personalized summaries
+                  Generate detailed fit reasons for top 10 USA-prioritized candidates
                 </p>
               </div>
             </div>
