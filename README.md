@@ -1,36 +1,84 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Researcher Finder
+
+A Next.js application that uses AI embeddings and semantic search to match research papers from arXiv with job descriptions, helping you find the perfect researchers for academic or industry positions.
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+- Node.js 20+
+- npm/yarn/pnpm/bun
+- OpenAI API key
 
+### Installation
+
+1. Clone the repository
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone git@github.com:Spencerrlbf/claude-code-web.git
+cd claude-code-web
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install dependencies
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Set up environment variables
+```bash
+cp .env.example .env.local
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Edit `.env.local` and add your OpenAI API key:
+```env
+OPENAI_API_KEY=sk-...
+```
 
-## Learn More
+4. Run the development server
+```bash
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the application.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## How It Works
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. **Paste a job description** - Input the requirements for your position
+2. **AI generates search strategies** - Creates 3-5 intelligent search approaches
+3. **Multi-source paper search** - Finds 100-200+ relevant papers from arXiv
+4. **Semantic matching** - Uses embeddings to calculate relevance
+5. **Location enrichment** - Identifies USA-based researchers via Semantic Scholar
+6. **AI evaluation** - Generates detailed fit analysis for top 10 candidates
 
-## Deploy on Vercel
+## Technology Stack
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Next.js 16** - React framework with App Router
+- **TypeScript** - Type-safe development
+- **Tailwind CSS** - Modern styling
+- **OpenAI API** - Embeddings and chat completions
+- **arXiv API** - Research paper source
+- **Semantic Scholar API** - Author metadata and citations
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Development
+
+```bash
+# Run development server
+npm run dev
+
+# Run tests
+npm test
+
+# Build for production
+npm run build
+
+# Start production server
+npm start
+```
+
+## Project Status
+
+🚧 **Active Development** - Currently in refactoring phase to improve modularity and matching algorithms.
+
+See `TODO.md` for detailed roadmap and `CLAUDE.md` for comprehensive project documentation.
+
+## License
+
+Private project - All rights reserved
