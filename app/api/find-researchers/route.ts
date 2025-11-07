@@ -600,7 +600,7 @@ export async function POST(request: NextRequest) {
     if (filteredPapers.length === 0) {
       debugLog.push('⚠️  WARNING: No papers passed similarity threshold');
       return NextResponse.json({
-        researchAreas: keywords,
+        searchStrategies: strategies,
         topResearchers: [],
         additionalCandidates: [],
         similarityDebug: { stats, topPapers: allScores },
