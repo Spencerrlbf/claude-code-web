@@ -39,6 +39,10 @@ interface ApiResponse {
   topResearchers: TopResearcher[];
   additionalCandidates: AdditionalCandidate[];
   totalPapersAnalyzed: number;
+  similarityDebug?: {
+    stats: { min: number; max: number; avg: number; median: number; };
+    topPapers: { title: string; score: number; }[];
+  };
   debug?: string[];
   error?: string;
 }
@@ -176,6 +180,77 @@ export default function Home() {
                   {log}
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Similarity Debug */}
+        {results?.similarityDebug && (
+          <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg shadow-lg p-6 mb-8">
+            <h3 className="text-xl font-bold text-yellow-900 mb-4">🔍 Similarity Score Analysis (Debug)</h3>
+
+            <div className="mb-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-white p-4 rounded-lg shadow">
+                <div className="text-sm text-gray-600 mb-1">Minimum</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {results.similarityDebug.stats.min.toFixed(3)}
+                </div>
+              </div>
+              <div className="bg-white p-4 rounded-lg shadow">
+                <div className="text-sm text-gray-600 mb-1">Maximum</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {results.similarityDebug.stats.max.toFixed(3)}
+                </div>
+              </div>
+              <div className="bg-white p-4 rounded-lg shadow">
+                <div className="text-sm text-gray-600 mb-1">Average</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {results.similarityDebug.stats.avg.toFixed(3)}
+                </div>
+              </div>
+              <div className="bg-white p-4 rounded-lg shadow">
+                <div className="text-sm text-gray-600 mb-1">Median</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {results.similarityDebug.stats.median.toFixed(3)}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-lg font-semibold text-gray-900 mb-3">
+                Top 10 Papers by Similarity Score:
+              </h4>
+              <div className="space-y-2">
+                {results.similarityDebug.topPapers.slice(0, 10).map((paper, idx) => (
+                  <div
+                    key={idx}
+                    className="bg-white p-3 rounded-lg flex items-start gap-3"
+                  >
+                    <div className="flex-shrink-0">
+                      <span className={`inline-block px-3 py-1 rounded-full text-sm font-bold ${
+                        paper.score >= 0.6
+                          ? 'bg-green-100 text-green-800'
+                          : paper.score >= 0.5
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {paper.score.toFixed(3)}
+                      </span>
+                    </div>
+                    <div className="flex-1 text-sm text-gray-700">
+                      {paper.title}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4 p-4 bg-yellow-100 rounded-lg">
+              <p className="text-sm text-yellow-900">
+                <strong>What this means:</strong> Similarity scores range from 0 (completely different) to 1 (identical).
+                Scores above 0.6 are considered good matches. If all scores are low (below 0.5), the papers may not be
+                semantically related to the job description, or the threshold needs adjustment.
+              </p>
             </div>
           </div>
         )}

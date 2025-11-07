@@ -200,25 +200,74 @@ function filterBySimilarity(
   jdEmbedding: number[],
   papers: PaperWithEmbedding[],
   threshold: number = 0.6
-): PaperWithEmbedding[] {
+): {
+  filtered: PaperWithEmbedding[];
+  allScores: { title: string; score: number; }[];
+  stats: { min: number; max: number; avg: number; median: number; };
+} {
   const papersWithScores = papers.map(paper => ({
     ...paper,
     similarityScore: cosineSimilarity(jdEmbedding, paper.embedding),
   }));
 
+  // Calculate statistics
+  const scores = papersWithScores.map(p => p.similarityScore!).sort((a, b) => b - a);
+  const stats = {
+    min: Math.min(...scores),
+    max: Math.max(...scores),
+    avg: scores.reduce((a, b) => a + b, 0) / scores.length,
+    median: scores[Math.floor(scores.length / 2)],
+  };
+
+  console.log('Similarity score stats:', stats);
+  console.log('Top 10 similarity scores:', scores.slice(0, 10));
+
+  // Get top papers info for debugging
+  const allScores = papersWithScores
+    .sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0))
+    .slice(0, 20) // Top 20 for debugging
+    .map(p => ({
+      title: p.title,
+      score: Math.round((p.similarityScore || 0) * 100) / 100,
+    }));
+
   let filtered = papersWithScores.filter(p => p.similarityScore! >= threshold);
 
-  // If we got too few, lower the threshold
+  // If we got too few, progressively lower the threshold
   if (filtered.length < 10) {
-    console.log(`Only ${filtered.length} papers above ${threshold}, lowering to 0.55...`);
+    console.log(`Only ${filtered.length} papers above ${threshold}, lowering threshold...`);
+
+    // Try 0.55
     filtered = papersWithScores.filter(p => p.similarityScore! >= 0.55);
+
+    // Try 0.50
+    if (filtered.length < 10) {
+      console.log(`Only ${filtered.length} papers above 0.55, lowering to 0.50...`);
+      filtered = papersWithScores.filter(p => p.similarityScore! >= 0.50);
+    }
+
+    // Try 0.45
+    if (filtered.length < 10) {
+      console.log(`Only ${filtered.length} papers above 0.50, lowering to 0.45...`);
+      filtered = papersWithScores.filter(p => p.similarityScore! >= 0.45);
+    }
+
+    // Just take top 30 if still too few
+    if (filtered.length < 10) {
+      console.log(`Still only ${filtered.length} papers, taking top 30 by score...`);
+      filtered = papersWithScores.sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0)).slice(0, 30);
+    }
   }
 
   // Sort by similarity
   filtered.sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0));
 
   // Take top 60 max
-  return filtered.slice(0, 60);
+  return {
+    filtered: filtered.slice(0, 60),
+    allScores,
+    stats,
+  };
 }
 
 // Step 5: Extract all authors and deduplicate
@@ -468,8 +517,17 @@ export async function POST(request: NextRequest) {
 
     // Step 4: Filter by similarity
     debugLog.push('📊 Step 4: Calculating similarity scores and filtering...');
-    const filteredPapers = filterBySimilarity(jdEmbedding, papersWithEmbeddings, 0.6);
-    debugLog.push(`✓ Filtered to ${filteredPapers.length} papers with similarity >= 0.6`);
+    const { filtered: filteredPapers, allScores, stats } = filterBySimilarity(jdEmbedding, papersWithEmbeddings, 0.6);
+
+    // Add detailed similarity debugging
+    debugLog.push(`✓ Similarity Score Stats:`);
+    debugLog.push(`   - Min: ${stats.min.toFixed(3)}, Max: ${stats.max.toFixed(3)}`);
+    debugLog.push(`   - Avg: ${stats.avg.toFixed(3)}, Median: ${stats.median.toFixed(3)}`);
+    debugLog.push(`✓ Top 5 papers by similarity:`);
+    allScores.slice(0, 5).forEach((paper, idx) => {
+      debugLog.push(`   ${idx + 1}. [${paper.score}] ${paper.title.slice(0, 80)}...`);
+    });
+    debugLog.push(`✓ Filtered to ${filteredPapers.length} papers above threshold`);
 
     if (filteredPapers.length === 0) {
       debugLog.push('⚠️  WARNING: No papers passed similarity threshold');
@@ -477,6 +535,7 @@ export async function POST(request: NextRequest) {
         researchAreas: keywords,
         topResearchers: [],
         additionalCandidates: [],
+        similarityDebug: { stats, topPapers: allScores },
         debug: debugLog,
         error: 'No papers were similar enough to the job description',
       });
@@ -529,6 +588,10 @@ export async function POST(request: NextRequest) {
         paper: a.paper,
       })),
       totalPapersAnalyzed: papers.length,
+      similarityDebug: {
+        stats,
+        topPapers: allScores,
+      },
       debug: debugLog,
     });
 
