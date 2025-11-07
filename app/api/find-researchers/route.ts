@@ -1,48 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { XMLParser } from 'fast-xml-parser';
+import type {
+  SearchStrategy,
+  ResearchArea,
+  ArxivPaper,
+  PaperWithEmbedding,
+  AuthorCandidate,
+  TopResearcher,
+  Location,
+} from '@/lib/types';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-
-interface SearchStrategy {
-  name: string;
-  rationale: string;
-  queries: string[];
-}
-
-interface ResearchArea {
-  term: string;
-  importance: 'high' | 'medium' | 'low';
-}
-
-interface ArxivPaper {
-  id: string;
-  title: string;
-  authors: string[];
-  summary: string;
-  published: string;
-  link: string;
-}
-
-interface PaperWithEmbedding extends ArxivPaper {
-  embedding: number[];
-  similarityScore?: number;
-}
-
-interface AuthorCandidate {
-  name: string;
-  paper: ArxivPaper;
-  similarityScore: number;
-  location?: 'USA' | 'International' | 'Unknown';
-  affiliation?: string;
-}
-
-interface TopResearcher extends AuthorCandidate {
-  aiRelevanceScore: number;
-  fitReason: string;
-}
 
 // Helper: Calculate cosine similarity between two vectors
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
@@ -395,20 +366,20 @@ async function checkUSALocation(authors: AuthorCandidate[]): Promise<AuthorCandi
         );
 
         if (!response.ok) {
-          return { ...author, location: 'Unknown' as const };
+          return { ...author, location: 'Unknown' as Location };
         }
 
         const data = await response.json();
 
         if (!data.data || data.data.length === 0) {
-          return { ...author, location: 'Unknown' as const };
+          return { ...author, location: 'Unknown' as Location };
         }
 
         const authorData = data.data[0];
         const affiliations = authorData.affiliations || [];
 
         if (affiliations.length === 0) {
-          return { ...author, location: 'Unknown' as const };
+          return { ...author, location: 'Unknown' as Location };
         }
 
         // Check if any affiliation contains USA keywords
@@ -417,12 +388,12 @@ async function checkUSALocation(authors: AuthorCandidate[]): Promise<AuthorCandi
 
         return {
           ...author,
-          location: isUSA ? ('USA' as const) : ('International' as const),
+          location: isUSA ? ('USA' as Location) : ('International' as Location),
           affiliation: affiliations[0],
         };
       } catch (error) {
         console.error(`Error checking location for ${author.name}:`, error);
-        return { ...author, location: 'Unknown' as const };
+        return { ...author, location: 'Unknown' as Location };
       }
     })
   );

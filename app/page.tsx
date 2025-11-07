@@ -1,62 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-
-interface SearchStrategy {
-  name: string;
-  rationale: string;
-  queries: string[];
-}
-
-interface StrategyUsed {
-  name: string;
-  rationale: string;
-  papersFound: number;
-}
-
-interface ArxivPaper {
-  id: string;
-  title: string;
-  authors: string[];
-  summary: string;
-  published: string;
-  link: string;
-}
-
-interface TopResearcher {
-  name: string;
-  similarityScore: number;
-  aiRelevanceScore: number;
-  fitReason: string;
-  location: 'USA' | 'International' | 'Unknown';
-  affiliation?: string;
-  paper: ArxivPaper;
-}
-
-interface AdditionalCandidate {
-  name: string;
-  similarityScore: number;
-  location: 'USA' | 'International' | 'Unknown';
-  affiliation?: string;
-  paper: ArxivPaper;
-}
-
-interface ApiResponse {
-  searchStrategies: SearchStrategy[];
-  strategiesUsed?: StrategyUsed[];
-  topResearchers: TopResearcher[];
-  additionalCandidates: AdditionalCandidate[];
-  totalPapersAnalyzed: number;
-  similarityDebug?: {
-    stats: { min: number; max: number; avg: number; median: number; };
-    topPapers: { title: string; score: number; }[];
-  };
-  debug?: string[];
-  error?: string;
-}
+import type {
+  ApiResponse,
+  Location,
+} from '@/lib/types';
 
 // Location badge component
-function LocationBadge({ location }: { location: 'USA' | 'International' | 'Unknown' }) {
+function LocationBadge({ location }: { location: Location }) {
   const styles = {
     USA: 'bg-blue-100 text-blue-800 border-blue-300',
     International: 'bg-purple-100 text-purple-800 border-purple-300',
