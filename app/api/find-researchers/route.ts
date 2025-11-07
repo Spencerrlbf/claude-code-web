@@ -6,6 +6,12 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+interface SearchStrategy {
+  name: string;
+  rationale: string;
+  queries: string[];
+}
+
 interface ResearchArea {
   term: string;
   importance: 'high' | 'medium' | 'low';
@@ -64,40 +70,65 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
   return dotProduct / (normA * normB);
 }
 
-// Step 1: Extract keywords and create JD embedding
-async function extractKeywordsAndEmbedding(jobDescription: string): Promise<{
-  keywords: ResearchArea[];
+// Step 1: Generate intelligent search strategies and create JD embedding
+async function generateSearchStrategiesAndEmbedding(jobDescription: string): Promise<{
+  strategies: SearchStrategy[];
   embedding: number[];
 }> {
-  // Extract keywords
-  const keywordCompletion = await openai.chat.completions.create({
+  // Generate search strategies using OpenAI's domain intelligence
+  const strategyCompletion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [
       {
         role: 'system',
-        content: `You are an expert at analyzing job descriptions and extracting specific technical research keywords.
+        content: `You are an expert at identifying relevant research areas for academic/industry hiring.
 
-Extract 3-5 VERY SPECIFIC technical terms or research areas from the job description. These will be used to search academic papers.
+Given a job description, suggest 3-5 different search strategies to find researchers with relevant expertise on arXiv.
 
-Rules:
-- Use precise technical terms (e.g., "neural networks", "transformer architecture", "reinforcement learning")
-- Avoid vague terms (e.g., "AI", "technology", "innovation")
-- Prefer multi-word phrases over single words
-- Focus on methods, techniques, or specific research domains
+For each strategy:
+1. Identify a research area/domain (be specific)
+2. Explain why it's relevant (what expertise it demonstrates)
+3. Provide 2-3 arXiv search queries using the abs: field format
 
-Return ONLY a JSON object with this exact format:
-{"areas": [{"term": "deep learning", "importance": "high"}, {"term": "computer vision", "importance": "medium"}]}`,
+Consider multiple angles:
+- CORE: Direct matches for skills explicitly mentioned
+- ADJACENT: Related fields that demonstrate transferable expertise
+- FOUNDATIONAL: Underlying techniques/methods required
+- APPLICATIONS: Similar problem domains or use cases
+
+Search query tips:
+- Use + instead of spaces (e.g., "machine+learning")
+- Be specific but not overly narrow
+- Each query should be different enough to find diverse papers
+
+Return JSON:
+{
+  "strategies": [
+    {
+      "name": "Core Deep Learning",
+      "rationale": "Direct match for deep learning expertise mentioned in JD",
+      "queries": ["abs:deep+learning", "abs:neural+networks", "abs:convolutional+networks"]
+    },
+    {
+      "name": "Computer Vision Applications",
+      "rationale": "Adjacent field showing practical ML application skills",
+      "queries": ["abs:computer+vision", "abs:image+recognition", "abs:object+detection"]
+    }
+  ]
+}`,
       },
       {
         role: 'user',
-        content: `Extract key research areas from this job description:\n\n${jobDescription}`,
+        content: `Job Description:\n\n${jobDescription}`,
       },
     ],
     response_format: { type: 'json_object' },
   });
 
-  const keywordResult = JSON.parse(keywordCompletion.choices[0].message.content || '{}');
-  const keywords = keywordResult.areas || [];
+  const strategyResult = JSON.parse(strategyCompletion.choices[0].message.content || '{}');
+  const strategies = strategyResult.strategies || [];
+
+  console.log('Generated search strategies:', JSON.stringify(strategies, null, 2));
 
   // Create embedding for full job description
   const embeddingResponse = await openai.embeddings.create({
@@ -107,62 +138,91 @@ Return ONLY a JSON object with this exact format:
 
   const embedding = embeddingResponse.data[0].embedding;
 
-  return { keywords, embedding };
+  return { strategies, embedding };
 }
 
-// Step 2: Search arXiv for papers
-async function searchArxivPapers(keywords: ResearchArea[]): Promise<ArxivPaper[]> {
-  const searchParts = keywords.slice(0, 3).map(area => {
-    const term = area.term.replace(/[^\w\s]/g, '').replace(/\s+/g, '+');
-    return `abs:${term}`;
-  });
+// Helper: Execute a single arXiv search query
+async function executeSingleArxivSearch(query: string, maxResults: number = 50): Promise<ArxivPaper[]> {
+  const url = `http://export.arxiv.org/api/query?search_query=${query}&start=0&max_results=${maxResults}&sortBy=submittedDate&sortOrder=descending`;
 
-  // Try AND first
-  const searchQuery = searchParts.join(' AND ');
-  const url = `http://export.arxiv.org/api/query?search_query=${searchQuery}&start=0&max_results=150&sortBy=submittedDate&sortOrder=descending`;
+  try {
+    const response = await fetch(url);
+    const xmlData = await response.text();
 
-  console.log('arXiv search query:', searchQuery);
+    const parser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: '@_',
+    });
 
-  const response = await fetch(url);
-  const xmlData = await response.text();
+    const result = parser.parse(xmlData);
+    const entries = result.feed?.entry ? (Array.isArray(result.feed.entry) ? result.feed.entry : [result.feed.entry]) : [];
 
-  const parser = new XMLParser({
-    ignoreAttributes: false,
-    attributeNamePrefix: '@_',
-  });
+    return entries
+      .filter((entry: any) => entry && entry.title && entry.summary)
+      .map((entry: any) => ({
+        id: entry.id,
+        title: entry.title?.replace(/\s+/g, ' ').trim() || '',
+        authors: Array.isArray(entry.author)
+          ? entry.author.map((a: any) => a.name)
+          : [entry.author?.name || 'Unknown'],
+        summary: entry.summary?.replace(/\s+/g, ' ').trim() || '',
+        published: entry.published || '',
+        link: entry.id || '',
+      }));
+  } catch (error) {
+    console.error(`Error searching arXiv with query "${query}":`, error);
+    return [];
+  }
+}
 
-  const result = parser.parse(xmlData);
+// Step 2: Execute multiple search strategies in parallel
+async function searchArxivWithStrategies(strategies: SearchStrategy[]): Promise<{
+  papers: ArxivPaper[];
+  strategiesUsed: { name: string; rationale: string; papersFound: number; }[];
+}> {
+  console.log(`Executing ${strategies.length} search strategies...`);
 
-  // Check if we got enough results
-  let entries = result.feed?.entry ? (Array.isArray(result.feed.entry) ? result.feed.entry : [result.feed.entry]) : [];
+  const allPapers: ArxivPaper[] = [];
+  const strategiesUsed: { name: string; rationale: string; papersFound: number; }[] = [];
 
-  // Fallback to OR if we got too few results
-  if (entries.length < 50) {
-    console.log(`Only got ${entries.length} papers with AND, trying OR...`);
-    const fallbackQuery = searchParts.join(' OR ');
-    const fallbackUrl = `http://export.arxiv.org/api/query?search_query=${fallbackQuery}&start=0&max_results=150&sortBy=submittedDate&sortOrder=descending`;
+  // Execute all strategies
+  for (const strategy of strategies) {
+    console.log(`Strategy: ${strategy.name} - ${strategy.queries.length} queries`);
+    let strategyPapers: ArxivPaper[] = [];
 
-    const fallbackResponse = await fetch(fallbackUrl);
-    const fallbackXmlData = await fallbackResponse.text();
-    const fallbackResult = parser.parse(fallbackXmlData);
+    // Execute all queries for this strategy
+    for (const query of strategy.queries) {
+      console.log(`  Searching: ${query}`);
+      const papers = await executeSingleArxivSearch(query, 40);
+      strategyPapers.push(...papers);
+      console.log(`    Found ${papers.length} papers`);
+    }
 
-    entries = fallbackResult.feed?.entry ? (Array.isArray(fallbackResult.feed.entry) ? fallbackResult.feed.entry : [fallbackResult.feed.entry]) : [];
+    allPapers.push(...strategyPapers);
+    strategiesUsed.push({
+      name: strategy.name,
+      rationale: strategy.rationale,
+      papersFound: strategyPapers.length,
+    });
   }
 
-  console.log(`Found ${entries.length} papers from arXiv`);
+  // Deduplicate papers by ID
+  const uniquePapersMap = new Map<string, ArxivPaper>();
+  allPapers.forEach(paper => {
+    if (!uniquePapersMap.has(paper.id)) {
+      uniquePapersMap.set(paper.id, paper);
+    }
+  });
 
-  return entries
-    .filter((entry: any) => entry && entry.title && entry.summary)
-    .map((entry: any) => ({
-      id: entry.id,
-      title: entry.title?.replace(/\s+/g, ' ').trim() || '',
-      authors: Array.isArray(entry.author)
-        ? entry.author.map((a: any) => a.name)
-        : [entry.author?.name || 'Unknown'],
-      summary: entry.summary?.replace(/\s+/g, ' ').trim() || '',
-      published: entry.published || '',
-      link: entry.id || '',
-    }));
+  const uniquePapers = Array.from(uniquePapersMap.values());
+
+  console.log(`Total papers before deduplication: ${allPapers.length}`);
+  console.log(`Unique papers after deduplication: ${uniquePapers.length}`);
+
+  return {
+    papers: uniquePapers,
+    strategiesUsed,
+  };
 }
 
 // Step 3: Create embeddings for all paper abstracts
@@ -389,9 +449,9 @@ function selectTop10(authors: AuthorCandidate[]): AuthorCandidate[] {
 async function generateFitReasons(
   candidates: AuthorCandidate[],
   jobDescription: string,
-  keywords: ResearchArea[]
+  strategies: SearchStrategy[]
 ): Promise<TopResearcher[]> {
-  const targetAreas = keywords.map(a => a.term).join(', ');
+  const targetAreas = strategies.map(s => s.name).join(', ');
   const topResearchers: TopResearcher[] = [];
 
   console.log(`Generating AI fit reasons for ${candidates.length} top researchers...`);
@@ -478,35 +538,43 @@ export async function POST(request: NextRequest) {
 
     debugLog.push(`📝 Received job description (${jobDescription.length} characters)`);
 
-    // Step 1: Extract keywords and create JD embedding
-    debugLog.push('🔍 Step 1: Extracting keywords and creating job description embedding...');
-    const { keywords, embedding: jdEmbedding } = await extractKeywordsAndEmbedding(jobDescription);
-    debugLog.push(`✓ Extracted ${keywords.length} keywords: ${keywords.map(k => k.term).join(', ')}`);
+    // Step 1: Generate intelligent search strategies and create JD embedding
+    debugLog.push('🧠 Step 1: Generating intelligent search strategies with AI...');
+    const { strategies, embedding: jdEmbedding } = await generateSearchStrategiesAndEmbedding(jobDescription);
+    debugLog.push(`✓ Generated ${strategies.length} search strategies:`);
+    strategies.forEach((s, idx) => {
+      debugLog.push(`   ${idx + 1}. ${s.name} - ${s.rationale}`);
+      debugLog.push(`      Queries: ${s.queries.join(', ')}`);
+    });
 
-    if (keywords.length === 0) {
-      debugLog.push('⚠️  WARNING: No keywords extracted!');
+    if (strategies.length === 0) {
+      debugLog.push('⚠️  WARNING: No search strategies generated!');
       return NextResponse.json({
-        researchAreas: [],
+        searchStrategies: [],
         topResearchers: [],
         additionalCandidates: [],
         debug: debugLog,
-        error: 'No research areas could be extracted from the job description',
+        error: 'No search strategies could be generated from the job description',
       });
     }
 
-    // Step 2: Search arXiv
-    debugLog.push('📚 Step 2: Searching arXiv for papers...');
-    const papers = await searchArxivPapers(keywords);
-    debugLog.push(`✓ Found ${papers.length} papers from arXiv`);
+    // Step 2: Execute search strategies on arXiv
+    debugLog.push('📚 Step 2: Executing search strategies on arXiv...');
+    const { papers, strategiesUsed } = await searchArxivWithStrategies(strategies);
+    debugLog.push(`✓ Search results by strategy:`);
+    strategiesUsed.forEach((s, idx) => {
+      debugLog.push(`   ${idx + 1}. ${s.name}: ${s.papersFound} papers`);
+    });
+    debugLog.push(`✓ Total unique papers found: ${papers.length}`);
 
     if (papers.length === 0) {
       debugLog.push('⚠️  WARNING: No papers found on arXiv');
       return NextResponse.json({
-        researchAreas: keywords,
+        searchStrategies: strategies,
         topResearchers: [],
         additionalCandidates: [],
         debug: debugLog,
-        error: 'No papers found on arXiv for the extracted research areas',
+        error: 'No papers found on arXiv for any of the search strategies',
       });
     }
 
@@ -559,7 +627,7 @@ export async function POST(request: NextRequest) {
 
     // Step 8: Generate AI fit reasons for top 10 only
     debugLog.push('🤖 Step 8: Generating AI fit reasons for top 10...');
-    const topResearchers = await generateFitReasons(top10Candidates, jobDescription, keywords);
+    const topResearchers = await generateFitReasons(top10Candidates, jobDescription, strategies);
     debugLog.push(`✓ Generated AI analysis for all top 10 researchers`);
 
     // Prepare additional candidates (without AI fit reasons)
@@ -570,7 +638,8 @@ export async function POST(request: NextRequest) {
     debugLog.push('✅ Complete! Returning results.');
 
     return NextResponse.json({
-      researchAreas: keywords,
+      searchStrategies: strategies,
+      strategiesUsed,
       topResearchers: topResearchers.map(r => ({
         name: r.name,
         similarityScore: Math.round(r.similarityScore * 100),

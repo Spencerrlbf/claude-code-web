@@ -2,9 +2,16 @@
 
 import { useState } from 'react';
 
-interface ResearchArea {
-  term: string;
-  importance: 'high' | 'medium' | 'low';
+interface SearchStrategy {
+  name: string;
+  rationale: string;
+  queries: string[];
+}
+
+interface StrategyUsed {
+  name: string;
+  rationale: string;
+  papersFound: number;
 }
 
 interface ArxivPaper {
@@ -35,7 +42,8 @@ interface AdditionalCandidate {
 }
 
 interface ApiResponse {
-  researchAreas: ResearchArea[];
+  searchStrategies: SearchStrategy[];
+  strategiesUsed?: StrategyUsed[];
   topResearchers: TopResearcher[];
   additionalCandidates: AdditionalCandidate[];
   totalPapersAnalyzed: number;
@@ -258,29 +266,32 @@ export default function Home() {
         {/* Results Section */}
         {results && !loading && (
           <div className="space-y-8">
-            {/* Research Areas */}
+            {/* Search Strategies */}
             <div className="bg-white rounded-lg shadow-lg p-6">
               <h2 className="text-2xl font-bold text-gray-900 mb-4">
-                Identified Research Areas
+                🧠 Intelligent Search Strategies
               </h2>
-              <div className="flex flex-wrap gap-2">
-                {results.researchAreas.map((area, idx) => (
-                  <span
+              <p className="text-gray-600 mb-4">
+                AI analyzed your job description and generated {results.searchStrategies.length} search strategies to find relevant researchers:
+              </p>
+              <div className="space-y-4">
+                {results.strategiesUsed && results.strategiesUsed.map((strategy, idx) => (
+                  <div
                     key={idx}
-                    className={`px-4 py-2 rounded-full text-sm font-medium ${
-                      area.importance === 'high'
-                        ? 'bg-indigo-100 text-indigo-800'
-                        : area.importance === 'medium'
-                        ? 'bg-blue-100 text-blue-800'
-                        : 'bg-gray-100 text-gray-800'
-                    }`}
+                    className="border-l-4 border-indigo-500 bg-indigo-50 p-4 rounded-r-lg"
                   >
-                    {area.term}
-                  </span>
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="font-bold text-gray-900">{strategy.name}</h3>
+                      <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-semibold">
+                        {strategy.papersFound} papers
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-700">{strategy.rationale}</p>
+                  </div>
                 ))}
               </div>
               <p className="mt-4 text-sm text-gray-500">
-                Analyzed {results.totalPapersAnalyzed} papers from arXiv using semantic similarity
+                Analyzed {results.totalPapersAnalyzed} unique papers from arXiv using semantic similarity
               </p>
             </div>
 
@@ -418,36 +429,36 @@ export default function Home() {
                 <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl mx-auto mb-3">
                   1
                 </div>
-                <h3 className="font-semibold text-gray-900 mb-2">AI Embedding</h3>
+                <h3 className="font-semibold text-gray-900 mb-2">Generate Search Strategies</h3>
                 <p className="text-sm text-gray-600">
-                  Create semantic embedding of your job description using OpenAI
+                  AI analyzes your JD and suggests 3-5 intelligent search strategies (core, adjacent, foundational fields)
                 </p>
               </div>
               <div className="text-center">
                 <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl mx-auto mb-3">
                   2
                 </div>
-                <h3 className="font-semibold text-gray-900 mb-2">Search 100+ Papers</h3>
+                <h3 className="font-semibold text-gray-900 mb-2">Multi-Strategy Search</h3>
                 <p className="text-sm text-gray-600">
-                  Find recent arXiv papers and compute similarity with your JD
+                  Execute multiple arXiv searches in parallel, find 100-200+ papers across different research areas
                 </p>
               </div>
               <div className="text-center">
                 <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl mx-auto mb-3">
                   3
                 </div>
-                <h3 className="font-semibold text-gray-900 mb-2">Check Location</h3>
+                <h3 className="font-semibold text-gray-900 mb-2">Semantic Filtering</h3>
                 <p className="text-sm text-gray-600">
-                  Verify author affiliations via Semantic Scholar API
+                  Use embeddings to filter by semantic similarity, check USA location via Semantic Scholar
                 </p>
               </div>
               <div className="text-center">
                 <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-xl mx-auto mb-3">
                   4
                 </div>
-                <h3 className="font-semibold text-gray-900 mb-2">AI Analysis</h3>
+                <h3 className="font-semibold text-gray-900 mb-2">AI Evaluation</h3>
                 <p className="text-sm text-gray-600">
-                  Generate detailed fit reasons for top 10 USA-prioritized candidates
+                  Generate detailed fit analysis for top 10 USA-prioritized researchers
                 </p>
               </div>
             </div>
