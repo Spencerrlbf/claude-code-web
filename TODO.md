@@ -177,7 +177,7 @@ This document outlines a modular, test-driven approach to improving the codebase
 
 ---
 
-### - [ ] 2.3 Create Semantic Scholar Service
+### - [x] 2.3 Create Semantic Scholar Service
 **Goal:** Encapsulate Semantic Scholar API for author location lookup.
 
 **What we're achieving:**
@@ -208,7 +208,7 @@ This document outlines a modular, test-driven approach to improving the codebase
 
 ## Phase 3: Core Business Logic Extraction
 
-### - [ ] 3.1 Create Search Strategy Module
+### - [x] 3.1 Create Search Strategy Module
 **Goal:** Isolate search strategy generation and execution logic.
 
 **What we're achieving:**
@@ -236,7 +236,7 @@ This document outlines a modular, test-driven approach to improving the codebase
 
 ---
 
-### - [ ] 3.2 Create Paper Matching Module
+### - [x] 3.2 Create Paper Matching Module
 **Goal:** Isolate semantic similarity and filtering logic.
 
 **What we're achieving:**
@@ -738,6 +738,6 @@ This document outlines a modular, test-driven approach to improving the codebase
 
 ## Current Status
 
-**Currently working on:** 2.3 Create Semantic Scholar Service (Next up)
-**Last completed:** 2.2 Create arXiv Service ✅
+**Currently working on:** 3.2 Create Paper Matching Module (parallel with 3.1)
+**Last completed:** 3.1 Create Search Strategy Module ✅ (Agent A completed)
 **Last updated:** 2025-11-08

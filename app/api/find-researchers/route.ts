@@ -9,78 +9,14 @@ import type {
   Location,
 } from '@/lib/types';
 import { config } from '@/lib/utils/config';
-import { cosineSimilarity } from '@/lib/utils/math';
 import { createOpenAIService } from '@/lib/services/openai-service';
 import { createArxivService } from '@/lib/services/arxiv-service';
 import { semanticScholarService } from '@/lib/services/semantic-scholar-service';
-
-// Step 1: Generate intelligent search strategies and create JD embedding
-async function generateSearchStrategiesAndEmbedding(
-  openaiService: ReturnType<typeof createOpenAIService>,
-  jobDescription: string
-): Promise<{
-  strategies: SearchStrategy[];
-  embedding: number[];
-}> {
-  // Generate search strategies and embedding using OpenAI service
-  const strategies = await openaiService.generateSearchStrategies(jobDescription);
-  const embedding = await openaiService.createEmbedding(jobDescription);
-
-  return { strategies, embedding };
-}
-
-// Step 2: Execute multiple search strategies in parallel
-async function searchArxivWithStrategies(
-  arxivService: ReturnType<typeof createArxivService>,
-  strategies: SearchStrategy[]
-): Promise<{
-  papers: ArxivPaper[];
-  strategiesUsed: { name: string; rationale: string; papersFound: number; }[];
-}> {
-  console.log(`Executing ${strategies.length} search strategies...`);
-
-  const allPapers: ArxivPaper[] = [];
-  const strategiesUsed: { name: string; rationale: string; papersFound: number; }[] = [];
-
-  // Execute all strategies
-  for (const strategy of strategies) {
-    console.log(`Strategy: ${strategy.name} - ${strategy.queries.length} queries`);
-    let strategyPapers: ArxivPaper[] = [];
-
-    // Execute all queries for this strategy
-    for (const query of strategy.queries) {
-      console.log(`  Searching: ${query}`);
-      const papers = await arxivService.searchPapers(query, config.arxiv.maxResultsPerQuery);
-      strategyPapers.push(...papers);
-      console.log(`    Found ${papers.length} papers`);
-    }
-
-    allPapers.push(...strategyPapers);
-    strategiesUsed.push({
-      name: strategy.name,
-      rationale: strategy.rationale,
-      papersFound: strategyPapers.length,
-    });
-  }
-
-  // Deduplicate papers by ID
-  const uniquePapersMap = new Map<string, ArxivPaper>();
-  allPapers.forEach(paper => {
-    if (!uniquePapersMap.has(paper.id)) {
-      uniquePapersMap.set(paper.id, paper);
-    }
-  });
-
-  const uniquePapers = Array.from(uniquePapersMap.values());
-
-  console.log(`Total papers before deduplication: ${allPapers.length}`);
-  console.log(`Unique papers after deduplication: ${uniquePapers.length}`);
-
-  return {
-    papers: uniquePapers,
-    strategiesUsed,
-  };
-}
+import {
+  generateSearchStrategies,
+  executeSearchStrategies,
+} from '@/lib/core/search-strategy';
+import { matchPapers } from '@/lib/core/paper-matching';
 
 // Step 3: Create embeddings for all paper abstracts
 async function createPaperEmbeddings(
@@ -99,75 +35,7 @@ async function createPaperEmbeddings(
   return papersWithEmbeddings;
 }
 
-// Step 4: Calculate similarity and filter
-function filterBySimilarity(
-  jdEmbedding: number[],
-  papers: PaperWithEmbedding[],
-  threshold: number = config.similarity.initialThreshold
-): {
-  filtered: PaperWithEmbedding[];
-  allScores: { title: string; score: number; }[];
-  stats: { min: number; max: number; avg: number; median: number; };
-} {
-  const papersWithScores = papers.map(paper => ({
-    ...paper,
-    similarityScore: cosineSimilarity(jdEmbedding, paper.embedding),
-  }));
-
-  // Calculate statistics
-  const scores = papersWithScores.map(p => p.similarityScore!).sort((a, b) => b - a);
-  const stats = {
-    min: Math.min(...scores),
-    max: Math.max(...scores),
-    avg: scores.reduce((a, b) => a + b, 0) / scores.length,
-    median: scores[Math.floor(scores.length / 2)],
-  };
-
-  console.log('Similarity score stats:', stats);
-  console.log('Top 10 similarity scores:', scores.slice(0, 10));
-
-  // Get top papers info for debugging
-  const allScores = papersWithScores
-    .sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0))
-    .slice(0, config.debug.topScoresCount) // Top N for debugging
-    .map(p => ({
-      title: p.title,
-      score: Math.round((p.similarityScore || 0) * 100) / 100,
-    }));
-
-  let filtered = papersWithScores.filter(p => p.similarityScore! >= threshold);
-
-  // If we got too few, progressively lower the threshold
-  if (filtered.length < config.similarity.minPapersForThreshold) {
-    console.log(`Only ${filtered.length} papers above ${threshold}, lowering threshold...`);
-
-    // Try fallback thresholds
-    for (const fallbackThreshold of config.similarity.fallbackThresholds) {
-      filtered = papersWithScores.filter(p => p.similarityScore! >= fallbackThreshold);
-      if (filtered.length >= config.similarity.minPapersForThreshold) {
-        console.log(`Found ${filtered.length} papers at threshold ${fallbackThreshold}`);
-        break;
-      }
-      console.log(`Only ${filtered.length} papers above ${fallbackThreshold}, trying lower threshold...`);
-    }
-
-    // Just take top N if still too few
-    if (filtered.length < config.similarity.minPapersForThreshold) {
-      console.log(`Still only ${filtered.length} papers, taking top ${config.similarity.minPapersAbsolute} by score...`);
-      filtered = papersWithScores.sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0)).slice(0, config.similarity.minPapersAbsolute);
-    }
-  }
-
-  // Sort by similarity
-  filtered.sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0));
-
-  // Take top N max
-  return {
-    filtered: filtered.slice(0, config.similarity.maxPapers),
-    allScores,
-    stats,
-  };
-}
+// Step 4: Calculate similarity and filter - Now handled by paper-matching module
 
 // Step 5: Extract all authors and deduplicate
 function extractAndDeduplicateAuthors(papers: PaperWithEmbedding[]): AuthorCandidate[] {
@@ -297,10 +165,8 @@ export async function POST(request: NextRequest) {
 
     // Step 1: Generate intelligent search strategies and create JD embedding
     debugLog.push('🧠 Step 1: Generating intelligent search strategies with AI...');
-    const { strategies, embedding: jdEmbedding } = await generateSearchStrategiesAndEmbedding(
-      openaiService,
-      jobDescription
-    );
+    const strategies = await generateSearchStrategies(jobDescription, openaiService);
+    const jdEmbedding = await openaiService.createEmbedding(jobDescription);
     debugLog.push(`✓ Generated ${strategies.length} search strategies:`);
     strategies.forEach((s, idx) => {
       debugLog.push(`   ${idx + 1}. ${s.name} - ${s.rationale}`);
@@ -320,7 +186,7 @@ export async function POST(request: NextRequest) {
 
     // Step 2: Execute search strategies on arXiv
     debugLog.push('📚 Step 2: Executing search strategies on arXiv...');
-    const { papers, strategiesUsed } = await searchArxivWithStrategies(arxivService, strategies);
+    const { papers, strategiesUsed } = await executeSearchStrategies(strategies, arxivService);
     debugLog.push(`✓ Search results by strategy:`);
     strategiesUsed.forEach((s, idx) => {
       debugLog.push(`   ${idx + 1}. ${s.name}: ${s.papersFound} papers`);
@@ -343,16 +209,32 @@ export async function POST(request: NextRequest) {
     const papersWithEmbeddings = await createPaperEmbeddings(openaiService, papers);
     debugLog.push(`✓ Created embeddings for ${papersWithEmbeddings.length} papers`);
 
-    // Step 4: Filter by similarity
+    // Step 4: Filter by similarity using new paper-matching module
     debugLog.push('📊 Step 4: Calculating similarity scores and filtering...');
-    const { filtered: filteredPapers, allScores, stats } = filterBySimilarity(jdEmbedding, papersWithEmbeddings, config.similarity.initialThreshold);
+    const matchResult = matchPapers(jdEmbedding, papersWithEmbeddings, {
+      useAdaptive: true,
+      minPapers: config.similarity.minPapersAbsolute,
+      maxPapers: config.similarity.maxPapers,
+      includeDebug: true,
+    });
+
+    const { filteredPapers, stats, threshold, allPapersWithScores } = matchResult;
+
+    // Create allScores for debugging (top N papers)
+    const allScores = allPapersWithScores
+      .slice(0, config.debug.topScoresCount)
+      .map(p => ({
+        title: p.title,
+        score: Math.round((p.similarityScore || 0) * 100) / 100,
+      }));
 
     // Add detailed similarity debugging
     debugLog.push(`✓ Similarity Score Stats:`);
     debugLog.push(`   - Min: ${stats.min.toFixed(3)}, Max: ${stats.max.toFixed(3)}`);
     debugLog.push(`   - Avg: ${stats.avg.toFixed(3)}, Median: ${stats.median.toFixed(3)}`);
+    debugLog.push(`   - Adaptive Threshold: ${threshold.toFixed(3)}`);
     debugLog.push(`✓ Top 5 papers by similarity:`);
-    allScores.slice(0, 5).forEach((paper, idx) => {
+    allScores.slice(0, 5).forEach((paper: { title: string; score: number }, idx: number) => {
       debugLog.push(`   ${idx + 1}. [${paper.score}] ${paper.title.slice(0, 80)}...`);
     });
     debugLog.push(`✓ Filtered to ${filteredPapers.length} papers above threshold`);
