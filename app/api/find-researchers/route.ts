@@ -12,6 +12,7 @@ import { config } from '@/lib/utils/config';
 import { cosineSimilarity } from '@/lib/utils/math';
 import { createOpenAIService } from '@/lib/services/openai-service';
 import { createArxivService } from '@/lib/services/arxiv-service';
+import { semanticScholarService } from '@/lib/services/semantic-scholar-service';
 
 // Step 1: Generate intelligent search strategies and create JD embedding
 async function generateSearchStrategiesAndEmbedding(
@@ -219,41 +220,13 @@ async function checkUSALocation(authors: AuthorCandidate[]): Promise<AuthorCandi
 
   const enrichedAuthors = await Promise.all(
     authors.map(async (author) => {
-      try {
-        const response = await fetch(
-          `${config.semanticScholar.apiUrl}?query=${encodeURIComponent(author.name)}&fields=${config.semanticScholar.authorSearchParams.fields}&limit=${config.semanticScholar.authorSearchParams.limit}`
-        );
+      const locationData = await semanticScholarService.getAuthorLocation(author.name);
 
-        if (!response.ok) {
-          return { ...author, location: 'Unknown' as Location };
-        }
-
-        const data = await response.json();
-
-        if (!data.data || data.data.length === 0) {
-          return { ...author, location: 'Unknown' as Location };
-        }
-
-        const authorData = data.data[0];
-        const affiliations = authorData.affiliations || [];
-
-        if (affiliations.length === 0) {
-          return { ...author, location: 'Unknown' as Location };
-        }
-
-        // Check if any affiliation contains USA keywords
-        const affiliationText = affiliations.join(' ').toLowerCase();
-        const isUSA = config.location.usaKeywords.some(keyword => affiliationText.includes(keyword));
-
-        return {
-          ...author,
-          location: isUSA ? ('USA' as Location) : ('International' as Location),
-          affiliation: affiliations[0],
-        };
-      } catch (error) {
-        console.error(`Error checking location for ${author.name}:`, error);
-        return { ...author, location: 'Unknown' as Location };
-      }
+      return {
+        ...author,
+        location: locationData.location as Location,
+        affiliation: locationData.affiliations[0],
+      };
     })
   );
 

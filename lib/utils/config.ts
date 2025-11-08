@@ -104,6 +104,15 @@ export interface SemanticScholarConfig {
   };
   /** Request timeout in milliseconds */
   timeoutMs: number;
+  /** Maximum number of retry attempts for failed requests */
+  maxRetries: number;
+  /** Delay between retries in milliseconds */
+  retryDelay: number;
+  /** Rate limiting configuration */
+  rateLimit: {
+    /** Delay between requests in milliseconds */
+    delayBetweenRequests: number;
+  };
 }
 
 /**
@@ -273,6 +282,11 @@ export const config: Config = {
       limit: getEnvNumber('SEMANTIC_SCHOLAR_LIMIT', 1),
     },
     timeoutMs: getEnvNumber('SEMANTIC_SCHOLAR_TIMEOUT_MS', 10000),
+    maxRetries: getEnvNumber('SEMANTIC_SCHOLAR_MAX_RETRIES', 2),
+    retryDelay: getEnvNumber('SEMANTIC_SCHOLAR_RETRY_DELAY', 1000),
+    rateLimit: {
+      delayBetweenRequests: getEnvNumber('SEMANTIC_SCHOLAR_RATE_LIMIT_DELAY', 100),
+    },
   },
 
   // Debug Configuration
@@ -382,6 +396,18 @@ export function validateConfig(cfg: Config): string[] {
 
   if (cfg.semanticScholar.timeoutMs <= 0) {
     errors.push('semanticScholar.timeoutMs must be greater than 0');
+  }
+
+  if (cfg.semanticScholar.maxRetries < 0) {
+    errors.push('semanticScholar.maxRetries must be non-negative');
+  }
+
+  if (cfg.semanticScholar.retryDelay < 0) {
+    errors.push('semanticScholar.retryDelay must be non-negative');
+  }
+
+  if (cfg.semanticScholar.rateLimit.delayBetweenRequests < 0) {
+    errors.push('semanticScholar.rateLimit.delayBetweenRequests must be non-negative');
   }
 
   // Validate debug configuration
