@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
 import { XMLParser } from 'fast-xml-parser';
 import type {
   SearchStrategy,
@@ -12,78 +11,19 @@ import type {
 } from '@/lib/types';
 import { config } from '@/lib/utils/config';
 import { cosineSimilarity } from '@/lib/utils/math';
-
-const openai = new OpenAI({
-  apiKey: config.openai.apiKey,
-});
+import { createOpenAIService } from '@/lib/services/openai-service';
 
 // Step 1: Generate intelligent search strategies and create JD embedding
-async function generateSearchStrategiesAndEmbedding(jobDescription: string): Promise<{
+async function generateSearchStrategiesAndEmbedding(
+  openaiService: ReturnType<typeof createOpenAIService>,
+  jobDescription: string
+): Promise<{
   strategies: SearchStrategy[];
   embedding: number[];
 }> {
-  // Generate search strategies using OpenAI's domain intelligence
-  const strategyCompletion = await openai.chat.completions.create({
-    model: config.openai.models.chat,
-    messages: [
-      {
-        role: 'system',
-        content: `You are an expert at identifying relevant research areas for academic/industry hiring.
-
-Given a job description, suggest 3-5 different search strategies to find researchers with relevant expertise on arXiv.
-
-For each strategy:
-1. Identify a research area/domain (be specific)
-2. Explain why it's relevant (what expertise it demonstrates)
-3. Provide 2-3 arXiv search queries using the abs: field format
-
-Consider multiple angles:
-- CORE: Direct matches for skills explicitly mentioned
-- ADJACENT: Related fields that demonstrate transferable expertise
-- FOUNDATIONAL: Underlying techniques/methods required
-- APPLICATIONS: Similar problem domains or use cases
-
-Search query tips:
-- Use + instead of spaces (e.g., "machine+learning")
-- Be specific but not overly narrow
-- Each query should be different enough to find diverse papers
-
-Return JSON:
-{
-  "strategies": [
-    {
-      "name": "Core Deep Learning",
-      "rationale": "Direct match for deep learning expertise mentioned in JD",
-      "queries": ["abs:deep+learning", "abs:neural+networks", "abs:convolutional+networks"]
-    },
-    {
-      "name": "Computer Vision Applications",
-      "rationale": "Adjacent field showing practical ML application skills",
-      "queries": ["abs:computer+vision", "abs:image+recognition", "abs:object+detection"]
-    }
-  ]
-}`,
-      },
-      {
-        role: 'user',
-        content: `Job Description:\n\n${jobDescription}`,
-      },
-    ],
-    response_format: { type: 'json_object' },
-  });
-
-  const strategyResult = JSON.parse(strategyCompletion.choices[0].message.content || '{}');
-  const strategies = strategyResult.strategies || [];
-
-  console.log('Generated search strategies:', JSON.stringify(strategies, null, 2));
-
-  // Create embedding for full job description
-  const embeddingResponse = await openai.embeddings.create({
-    model: config.openai.models.embedding,
-    input: jobDescription,
-  });
-
-  const embedding = embeddingResponse.data[0].embedding;
+  // Generate search strategies and embedding using OpenAI service
+  const strategies = await openaiService.generateSearchStrategies(jobDescription);
+  const embedding = await openaiService.createEmbedding(jobDescription);
 
   return { strategies, embedding };
 }
@@ -173,31 +113,18 @@ async function searchArxivWithStrategies(strategies: SearchStrategy[]): Promise<
 }
 
 // Step 3: Create embeddings for all paper abstracts
-async function createPaperEmbeddings(papers: ArxivPaper[]): Promise<PaperWithEmbedding[]> {
-  console.log(`Creating embeddings for ${papers.length} papers...`);
+async function createPaperEmbeddings(
+  openaiService: ReturnType<typeof createOpenAIService>,
+  papers: ArxivPaper[]
+): Promise<PaperWithEmbedding[]> {
+  const abstracts = papers.map(p => p.summary);
+  const embeddings = await openaiService.createBatchEmbeddings(abstracts);
 
-  const papersWithEmbeddings: PaperWithEmbedding[] = [];
-
-  // Process in batches to avoid rate limits
-  const batchSize = config.openai.batchSize;
-  for (let i = 0; i < papers.length; i += batchSize) {
-    const batch = papers.slice(i, i + batchSize);
-    const abstracts = batch.map(p => p.summary);
-
-    const embeddingResponse = await openai.embeddings.create({
-      model: config.openai.models.embedding,
-      input: abstracts,
-    });
-
-    batch.forEach((paper, idx) => {
-      papersWithEmbeddings.push({
-        ...paper,
-        embedding: embeddingResponse.data[idx].embedding,
-      });
-    });
-
-    console.log(`Processed ${Math.min(i + batchSize, papers.length)}/${papers.length} papers`);
-  }
+  // Combine papers with their embeddings
+  const papersWithEmbeddings: PaperWithEmbedding[] = papers.map((paper, idx) => ({
+    ...paper,
+    embedding: embeddings[idx],
+  }));
 
   return papersWithEmbeddings;
 }
@@ -380,76 +307,27 @@ function selectTopResearchers(authors: AuthorCandidate[], topCount: number = con
 
 // Step 8: Generate AI fit reasons for top researchers
 async function generateFitReasons(
+  openaiService: ReturnType<typeof createOpenAIService>,
   candidates: AuthorCandidate[],
   jobDescription: string,
   strategies: SearchStrategy[]
 ): Promise<TopResearcher[]> {
-  const targetAreas = strategies.map(s => s.name).join(', ');
   const topResearchers: TopResearcher[] = [];
 
   console.log(`Generating AI fit reasons for ${candidates.length} top researchers...`);
 
   for (const candidate of candidates) {
-    try {
-      const completion = await openai.chat.completions.create({
-        model: config.openai.models.chat,
-        messages: [
-          {
-            role: 'system',
-            content: `You are an expert technical recruiter evaluating researchers for academic/industry positions.
+    const { score, reason } = await openaiService.evaluateResearcherFit(
+      candidate,
+      jobDescription,
+      strategies
+    );
 
-Given a job description and a research paper, you must:
-
-1. Carefully analyze how well the researcher's work matches the job requirements
-2. Provide a realistic relevance score (0-100) where:
-   - 90-100: Perfect match, directly addresses multiple key requirements
-   - 70-89: Strong match, covers most requirements with relevant experience
-   - 50-69: Moderate match, some relevant experience but missing key areas
-   - 30-49: Weak match, tangentially related work
-   - 0-29: Poor match, different field or minimal overlap
-
-3. Write a concise 2-3 sentence explanation focusing on:
-   - Specific technical skills/methods that match the role
-   - Relevant research contributions
-   - Any gaps or limitations
-
-Be HONEST and CRITICAL. Don't inflate scores. Only give high scores for genuinely strong matches.
-
-Return as JSON: {"score": 75, "reason": "This researcher has extensive experience with X and Y which directly aligns with the position. Their work on Z demonstrates practical application. However, they lack exposure to W mentioned in the job description."}`,
-          },
-          {
-            role: 'user',
-            content: `Job Description:
-${jobDescription}
-
-Target Research Areas: ${targetAreas}
-
-Research Paper:
-Title: ${candidate.paper.title}
-Authors: ${candidate.paper.authors.join(', ')}
-Abstract: ${candidate.paper.summary.slice(0, config.researchers.abstractPreviewLength)}
-
-Evaluate ${candidate.name} for this position.`,
-          },
-        ],
-        response_format: { type: 'json_object' },
-      });
-
-      const result = JSON.parse(completion.choices[0].message.content || '{}');
-
-      topResearchers.push({
-        ...candidate,
-        aiRelevanceScore: result.score || 0,
-        fitReason: result.reason || 'No reason provided',
-      });
-    } catch (error) {
-      console.error(`Error generating fit reason for ${candidate.name}:`, error);
-      topResearchers.push({
-        ...candidate,
-        aiRelevanceScore: 0,
-        fitReason: 'Error generating fit reason',
-      });
-    }
+    topResearchers.push({
+      ...candidate,
+      aiRelevanceScore: score,
+      fitReason: reason,
+    });
   }
 
   return topResearchers;
@@ -471,9 +349,15 @@ export async function POST(request: NextRequest) {
 
     debugLog.push(`📝 Received job description (${jobDescription.length} characters)`);
 
+    // Create OpenAI service instance
+    const openaiService = createOpenAIService();
+
     // Step 1: Generate intelligent search strategies and create JD embedding
     debugLog.push('🧠 Step 1: Generating intelligent search strategies with AI...');
-    const { strategies, embedding: jdEmbedding } = await generateSearchStrategiesAndEmbedding(jobDescription);
+    const { strategies, embedding: jdEmbedding } = await generateSearchStrategiesAndEmbedding(
+      openaiService,
+      jobDescription
+    );
     debugLog.push(`✓ Generated ${strategies.length} search strategies:`);
     strategies.forEach((s, idx) => {
       debugLog.push(`   ${idx + 1}. ${s.name} - ${s.rationale}`);
@@ -513,7 +397,7 @@ export async function POST(request: NextRequest) {
 
     // Step 3: Create embeddings for papers
     debugLog.push('🧮 Step 3: Creating embeddings for paper abstracts...');
-    const papersWithEmbeddings = await createPaperEmbeddings(papers);
+    const papersWithEmbeddings = await createPaperEmbeddings(openaiService, papers);
     debugLog.push(`✓ Created embeddings for ${papersWithEmbeddings.length} papers`);
 
     // Step 4: Filter by similarity
@@ -560,7 +444,7 @@ export async function POST(request: NextRequest) {
 
     // Step 8: Generate AI fit reasons for top researchers
     debugLog.push(`🤖 Step 8: Generating AI fit reasons for top ${config.researchers.topCount}...`);
-    const topResearchers = await generateFitReasons(topCandidates, jobDescription, strategies);
+    const topResearchers = await generateFitReasons(openaiService, topCandidates, jobDescription, strategies);
     debugLog.push(`✓ Generated AI analysis for all top ${config.researchers.topCount} researchers`);
 
     // Prepare additional candidates (without AI fit reasons)

@@ -117,7 +117,7 @@ This document outlines a modular, test-driven approach to improving the codebase
 
 ## Phase 2: Service Layer Extraction
 
-### - [ ] 2.1 Create OpenAI Service
+### - [x] 2.1 Create OpenAI Service
 **Goal:** Encapsulate all OpenAI API interactions in a single service with clear interfaces.
 
 **What we're achieving:**
@@ -738,6 +738,6 @@ This document outlines a modular, test-driven approach to improving the codebase
 
 ## Current Status
 
-**Currently working on:** 2.1 Create OpenAI Service (Next up)
-**Last completed:** 1.4 Extract Cosine Similarity Utility ✅
-**Last updated:** 2025-11-07
+**Currently working on:** 2.2 Create arXiv Service (Next up)
+**Last completed:** 2.1 Create OpenAI Service ✅
+**Last updated:** 2025-11-08
