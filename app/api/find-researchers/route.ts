@@ -10,9 +10,10 @@ import type {
   TopResearcher,
   Location,
 } from '@/lib/types';
+import { config } from '@/lib/utils/config';
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: config.openai.apiKey,
 });
 
 // Helper: Calculate cosine similarity between two vectors
@@ -48,7 +49,7 @@ async function generateSearchStrategiesAndEmbedding(jobDescription: string): Pro
 }> {
   // Generate search strategies using OpenAI's domain intelligence
   const strategyCompletion = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: config.openai.models.chat,
     messages: [
       {
         role: 'system',
@@ -103,7 +104,7 @@ Return JSON:
 
   // Create embedding for full job description
   const embeddingResponse = await openai.embeddings.create({
-    model: 'text-embedding-3-small',
+    model: config.openai.models.embedding,
     input: jobDescription,
   });
 
@@ -113,8 +114,8 @@ Return JSON:
 }
 
 // Helper: Execute a single arXiv search query
-async function executeSingleArxivSearch(query: string, maxResults: number = 50): Promise<ArxivPaper[]> {
-  const url = `http://export.arxiv.org/api/query?search_query=${query}&start=0&max_results=${maxResults}&sortBy=submittedDate&sortOrder=descending`;
+async function executeSingleArxivSearch(query: string, maxResults: number = config.arxiv.defaultMaxResults): Promise<ArxivPaper[]> {
+  const url = `${config.arxiv.apiUrl}?search_query=${query}&start=0&max_results=${maxResults}&sortBy=${config.arxiv.sortBy}&sortOrder=${config.arxiv.sortOrder}`;
 
   try {
     const response = await fetch(url);
@@ -164,7 +165,7 @@ async function searchArxivWithStrategies(strategies: SearchStrategy[]): Promise<
     // Execute all queries for this strategy
     for (const query of strategy.queries) {
       console.log(`  Searching: ${query}`);
-      const papers = await executeSingleArxivSearch(query, 40);
+      const papers = await executeSingleArxivSearch(query, config.arxiv.maxResultsPerQuery);
       strategyPapers.push(...papers);
       console.log(`    Found ${papers.length} papers`);
     }
@@ -202,14 +203,14 @@ async function createPaperEmbeddings(papers: ArxivPaper[]): Promise<PaperWithEmb
 
   const papersWithEmbeddings: PaperWithEmbedding[] = [];
 
-  // Process in batches of 20 to avoid rate limits
-  const batchSize = 20;
+  // Process in batches to avoid rate limits
+  const batchSize = config.openai.batchSize;
   for (let i = 0; i < papers.length; i += batchSize) {
     const batch = papers.slice(i, i + batchSize);
     const abstracts = batch.map(p => p.summary);
 
     const embeddingResponse = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
+      model: config.openai.models.embedding,
       input: abstracts,
     });
 
@@ -230,7 +231,7 @@ async function createPaperEmbeddings(papers: ArxivPaper[]): Promise<PaperWithEmb
 function filterBySimilarity(
   jdEmbedding: number[],
   papers: PaperWithEmbedding[],
-  threshold: number = 0.6
+  threshold: number = config.similarity.initialThreshold
 ): {
   filtered: PaperWithEmbedding[];
   allScores: { title: string; score: number; }[];
@@ -256,7 +257,7 @@ function filterBySimilarity(
   // Get top papers info for debugging
   const allScores = papersWithScores
     .sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0))
-    .slice(0, 20) // Top 20 for debugging
+    .slice(0, config.debug.topScoresCount) // Top N for debugging
     .map(p => ({
       title: p.title,
       score: Math.round((p.similarityScore || 0) * 100) / 100,
@@ -265,37 +266,32 @@ function filterBySimilarity(
   let filtered = papersWithScores.filter(p => p.similarityScore! >= threshold);
 
   // If we got too few, progressively lower the threshold
-  if (filtered.length < 10) {
+  if (filtered.length < config.similarity.minPapersForThreshold) {
     console.log(`Only ${filtered.length} papers above ${threshold}, lowering threshold...`);
 
-    // Try 0.55
-    filtered = papersWithScores.filter(p => p.similarityScore! >= 0.55);
-
-    // Try 0.50
-    if (filtered.length < 10) {
-      console.log(`Only ${filtered.length} papers above 0.55, lowering to 0.50...`);
-      filtered = papersWithScores.filter(p => p.similarityScore! >= 0.50);
+    // Try fallback thresholds
+    for (const fallbackThreshold of config.similarity.fallbackThresholds) {
+      filtered = papersWithScores.filter(p => p.similarityScore! >= fallbackThreshold);
+      if (filtered.length >= config.similarity.minPapersForThreshold) {
+        console.log(`Found ${filtered.length} papers at threshold ${fallbackThreshold}`);
+        break;
+      }
+      console.log(`Only ${filtered.length} papers above ${fallbackThreshold}, trying lower threshold...`);
     }
 
-    // Try 0.45
-    if (filtered.length < 10) {
-      console.log(`Only ${filtered.length} papers above 0.50, lowering to 0.45...`);
-      filtered = papersWithScores.filter(p => p.similarityScore! >= 0.45);
-    }
-
-    // Just take top 30 if still too few
-    if (filtered.length < 10) {
-      console.log(`Still only ${filtered.length} papers, taking top 30 by score...`);
-      filtered = papersWithScores.sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0)).slice(0, 30);
+    // Just take top N if still too few
+    if (filtered.length < config.similarity.minPapersForThreshold) {
+      console.log(`Still only ${filtered.length} papers, taking top ${config.similarity.minPapersAbsolute} by score...`);
+      filtered = papersWithScores.sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0)).slice(0, config.similarity.minPapersAbsolute);
     }
   }
 
   // Sort by similarity
   filtered.sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0));
 
-  // Take top 60 max
+  // Take top N max
   return {
-    filtered: filtered.slice(0, 60),
+    filtered: filtered.slice(0, config.similarity.maxPapers),
     allScores,
     stats,
   };
@@ -350,19 +346,11 @@ function extractAndDeduplicateAuthors(papers: PaperWithEmbedding[]): AuthorCandi
 async function checkUSALocation(authors: AuthorCandidate[]): Promise<AuthorCandidate[]> {
   console.log(`Checking location for ${authors.length} authors...`);
 
-  const USA_KEYWORDS = [
-    'usa', 'united states', 'u.s.', 'stanford', 'mit', 'berkeley', 'harvard',
-    'carnegie mellon', 'princeton', 'yale', 'cornell', 'caltech', 'chicago',
-    'columbia', 'michigan', 'washington', 'google', 'microsoft', 'meta',
-    'openai', 'anthropic', 'deepmind', 'california', 'new york', 'boston',
-    'seattle', 'san francisco', 'cambridge', 'texas', 'georgia', 'illinois',
-  ];
-
   const enrichedAuthors = await Promise.all(
     authors.map(async (author) => {
       try {
         const response = await fetch(
-          `https://api.semanticscholar.org/graph/v1/author/search?query=${encodeURIComponent(author.name)}&fields=name,affiliations&limit=1`
+          `${config.semanticScholar.apiUrl}?query=${encodeURIComponent(author.name)}&fields=${config.semanticScholar.authorSearchParams.fields}&limit=${config.semanticScholar.authorSearchParams.limit}`
         );
 
         if (!response.ok) {
@@ -384,7 +372,7 @@ async function checkUSALocation(authors: AuthorCandidate[]): Promise<AuthorCandi
 
         // Check if any affiliation contains USA keywords
         const affiliationText = affiliations.join(' ').toLowerCase();
-        const isUSA = USA_KEYWORDS.some(keyword => affiliationText.includes(keyword));
+        const isUSA = config.location.usaKeywords.some(keyword => affiliationText.includes(keyword));
 
         return {
           ...author,
@@ -401,22 +389,21 @@ async function checkUSALocation(authors: AuthorCandidate[]): Promise<AuthorCandi
   return enrichedAuthors;
 }
 
-// Step 7: Sort and select top 10
-function selectTop10(authors: AuthorCandidate[]): AuthorCandidate[] {
+// Step 7: Sort and select top N
+function selectTopResearchers(authors: AuthorCandidate[], topCount: number = config.researchers.topCount): AuthorCandidate[] {
   // Sort: USA first, then Unknown, then International; within each group, by similarity score
   const sorted = authors.sort((a, b) => {
-    const locationOrder = { USA: 0, Unknown: 1, International: 2 };
-    const locationDiff = locationOrder[a.location || 'Unknown'] - locationOrder[b.location || 'Unknown'];
+    const locationDiff = config.location.priorityOrder[a.location || 'Unknown'] - config.location.priorityOrder[b.location || 'Unknown'];
 
     if (locationDiff !== 0) return locationDiff;
 
     return b.similarityScore - a.similarityScore;
   });
 
-  return sorted.slice(0, 10);
+  return sorted.slice(0, topCount);
 }
 
-// Step 8: Generate AI fit reasons for top 10 only
+// Step 8: Generate AI fit reasons for top researchers
 async function generateFitReasons(
   candidates: AuthorCandidate[],
   jobDescription: string,
@@ -430,7 +417,7 @@ async function generateFitReasons(
   for (const candidate of candidates) {
     try {
       const completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: config.openai.models.chat,
         messages: [
           {
             role: 'system',
@@ -465,7 +452,7 @@ Target Research Areas: ${targetAreas}
 Research Paper:
 Title: ${candidate.paper.title}
 Authors: ${candidate.paper.authors.join(', ')}
-Abstract: ${candidate.paper.summary.slice(0, 600)}
+Abstract: ${candidate.paper.summary.slice(0, config.researchers.abstractPreviewLength)}
 
 Evaluate ${candidate.name} for this position.`,
           },
@@ -556,7 +543,7 @@ export async function POST(request: NextRequest) {
 
     // Step 4: Filter by similarity
     debugLog.push('📊 Step 4: Calculating similarity scores and filtering...');
-    const { filtered: filteredPapers, allScores, stats } = filterBySimilarity(jdEmbedding, papersWithEmbeddings, 0.6);
+    const { filtered: filteredPapers, allScores, stats } = filterBySimilarity(jdEmbedding, papersWithEmbeddings, config.similarity.initialThreshold);
 
     // Add detailed similarity debugging
     debugLog.push(`✓ Similarity Score Stats:`);
@@ -591,20 +578,20 @@ export async function POST(request: NextRequest) {
     const usaCount = authorsWithLocation.filter(a => a.location === 'USA').length;
     debugLog.push(`✓ Location check complete: ${usaCount} USA-based, ${authorsWithLocation.length - usaCount} other`);
 
-    // Step 7: Select top 10
-    debugLog.push('🏆 Step 7: Selecting top 10 researchers (USA-prioritized)...');
-    const top10Candidates = selectTop10(authorsWithLocation);
-    debugLog.push(`✓ Selected top 10 researchers`);
+    // Step 7: Select top N researchers
+    debugLog.push(`🏆 Step 7: Selecting top ${config.researchers.topCount} researchers (USA-prioritized)...`);
+    const topCandidates = selectTopResearchers(authorsWithLocation, config.researchers.topCount);
+    debugLog.push(`✓ Selected top ${config.researchers.topCount} researchers`);
 
-    // Step 8: Generate AI fit reasons for top 10 only
-    debugLog.push('🤖 Step 8: Generating AI fit reasons for top 10...');
-    const topResearchers = await generateFitReasons(top10Candidates, jobDescription, strategies);
-    debugLog.push(`✓ Generated AI analysis for all top 10 researchers`);
+    // Step 8: Generate AI fit reasons for top researchers
+    debugLog.push(`🤖 Step 8: Generating AI fit reasons for top ${config.researchers.topCount}...`);
+    const topResearchers = await generateFitReasons(topCandidates, jobDescription, strategies);
+    debugLog.push(`✓ Generated AI analysis for all top ${config.researchers.topCount} researchers`);
 
     // Prepare additional candidates (without AI fit reasons)
     const additionalCandidates = authorsWithLocation
-      .filter(a => !top10Candidates.find(t => t.name === a.name))
-      .slice(0, 20); // Return up to 20 additional candidates
+      .filter(a => !topCandidates.find(t => t.name === a.name))
+      .slice(0, config.researchers.additionalCount);
 
     debugLog.push('✅ Complete! Returning results.');
 
