@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { XMLParser } from 'fast-xml-parser';
 import type {
   SearchStrategy,
   ResearchArea,
@@ -12,6 +11,7 @@ import type {
 import { config } from '@/lib/utils/config';
 import { cosineSimilarity } from '@/lib/utils/math';
 import { createOpenAIService } from '@/lib/services/openai-service';
+import { createArxivService } from '@/lib/services/arxiv-service';
 
 // Step 1: Generate intelligent search strategies and create JD embedding
 async function generateSearchStrategiesAndEmbedding(
@@ -28,42 +28,11 @@ async function generateSearchStrategiesAndEmbedding(
   return { strategies, embedding };
 }
 
-// Helper: Execute a single arXiv search query
-async function executeSingleArxivSearch(query: string, maxResults: number = config.arxiv.defaultMaxResults): Promise<ArxivPaper[]> {
-  const url = `${config.arxiv.apiUrl}?search_query=${query}&start=0&max_results=${maxResults}&sortBy=${config.arxiv.sortBy}&sortOrder=${config.arxiv.sortOrder}`;
-
-  try {
-    const response = await fetch(url);
-    const xmlData = await response.text();
-
-    const parser = new XMLParser({
-      ignoreAttributes: false,
-      attributeNamePrefix: '@_',
-    });
-
-    const result = parser.parse(xmlData);
-    const entries = result.feed?.entry ? (Array.isArray(result.feed.entry) ? result.feed.entry : [result.feed.entry]) : [];
-
-    return entries
-      .filter((entry: any) => entry && entry.title && entry.summary)
-      .map((entry: any) => ({
-        id: entry.id,
-        title: entry.title?.replace(/\s+/g, ' ').trim() || '',
-        authors: Array.isArray(entry.author)
-          ? entry.author.map((a: any) => a.name)
-          : [entry.author?.name || 'Unknown'],
-        summary: entry.summary?.replace(/\s+/g, ' ').trim() || '',
-        published: entry.published || '',
-        link: entry.id || '',
-      }));
-  } catch (error) {
-    console.error(`Error searching arXiv with query "${query}":`, error);
-    return [];
-  }
-}
-
 // Step 2: Execute multiple search strategies in parallel
-async function searchArxivWithStrategies(strategies: SearchStrategy[]): Promise<{
+async function searchArxivWithStrategies(
+  arxivService: ReturnType<typeof createArxivService>,
+  strategies: SearchStrategy[]
+): Promise<{
   papers: ArxivPaper[];
   strategiesUsed: { name: string; rationale: string; papersFound: number; }[];
 }> {
@@ -80,7 +49,7 @@ async function searchArxivWithStrategies(strategies: SearchStrategy[]): Promise<
     // Execute all queries for this strategy
     for (const query of strategy.queries) {
       console.log(`  Searching: ${query}`);
-      const papers = await executeSingleArxivSearch(query, config.arxiv.maxResultsPerQuery);
+      const papers = await arxivService.searchPapers(query, config.arxiv.maxResultsPerQuery);
       strategyPapers.push(...papers);
       console.log(`    Found ${papers.length} papers`);
     }
@@ -349,8 +318,9 @@ export async function POST(request: NextRequest) {
 
     debugLog.push(`📝 Received job description (${jobDescription.length} characters)`);
 
-    // Create OpenAI service instance
+    // Create service instances
     const openaiService = createOpenAIService();
+    const arxivService = createArxivService();
 
     // Step 1: Generate intelligent search strategies and create JD embedding
     debugLog.push('🧠 Step 1: Generating intelligent search strategies with AI...');
@@ -377,7 +347,7 @@ export async function POST(request: NextRequest) {
 
     // Step 2: Execute search strategies on arXiv
     debugLog.push('📚 Step 2: Executing search strategies on arXiv...');
-    const { papers, strategiesUsed } = await searchArxivWithStrategies(strategies);
+    const { papers, strategiesUsed } = await searchArxivWithStrategies(arxivService, strategies);
     debugLog.push(`✓ Search results by strategy:`);
     strategiesUsed.forEach((s, idx) => {
       debugLog.push(`   ${idx + 1}. ${s.name}: ${s.papersFound} papers`);

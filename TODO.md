@@ -148,7 +148,7 @@ This document outlines a modular, test-driven approach to improving the codebase
 
 ---
 
-### - [ ] 2.2 Create arXiv Service
+### - [x] 2.2 Create arXiv Service
 **Goal:** Encapsulate all arXiv API interactions in a dedicated service.
 
 **What we're achieving:**
@@ -738,6 +738,6 @@ This document outlines a modular, test-driven approach to improving the codebase
 
 ## Current Status
 
-**Currently working on:** 2.2 Create arXiv Service (Next up)
-**Last completed:** 2.1 Create OpenAI Service ✅
+**Currently working on:** 2.3 Create Semantic Scholar Service (Next up)
+**Last completed:** 2.2 Create arXiv Service ✅
 **Last updated:** 2025-11-08
