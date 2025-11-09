@@ -267,7 +267,7 @@ This document outlines a modular, test-driven approach to improving the codebase
 
 ---
 
-### - [ ] 3.3 Create Author Extraction Module
+### - [x] 3.3 Create Author Extraction Module
 **Goal:** Isolate author deduplication and candidate creation logic.
 
 **What we're achieving:**
@@ -738,6 +738,6 @@ This document outlines a modular, test-driven approach to improving the codebase
 
 ## Current Status
 
-**Currently working on:** 3.2 Create Paper Matching Module (parallel with 3.1)
-**Last completed:** 3.1 Create Search Strategy Module ✅ (Agent A completed)
+**Currently working on:** 3.4 Create Location Enrichment Module (next in Phase 3)
+**Last completed:** 3.3 Create Author Extraction Module ✅
 **Last updated:** 2025-11-08
