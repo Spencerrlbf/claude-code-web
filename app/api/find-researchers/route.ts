@@ -18,6 +18,7 @@ import {
 } from '@/lib/core/search-strategy';
 import { matchPapers } from '@/lib/core/paper-matching';
 import { enrichWithLocation } from '@/lib/core/location-enrichment';
+import { evaluateResearchers } from '@/lib/core/ai-evaluation';
 
 // Step 3: Create embeddings for all paper abstracts
 async function createPaperEmbeddings(
@@ -99,33 +100,7 @@ function selectTopResearchers(authors: AuthorCandidate[], topCount: number = con
   return sorted.slice(0, topCount);
 }
 
-// Step 8: Generate AI fit reasons for top researchers
-async function generateFitReasons(
-  openaiService: ReturnType<typeof createOpenAIService>,
-  candidates: AuthorCandidate[],
-  jobDescription: string,
-  strategies: SearchStrategy[]
-): Promise<TopResearcher[]> {
-  const topResearchers: TopResearcher[] = [];
-
-  console.log(`Generating AI fit reasons for ${candidates.length} top researchers...`);
-
-  for (const candidate of candidates) {
-    const { score, reason } = await openaiService.evaluateResearcherFit(
-      candidate,
-      jobDescription,
-      strategies
-    );
-
-    topResearchers.push({
-      ...candidate,
-      aiRelevanceScore: score,
-      fitReason: reason,
-    });
-  }
-
-  return topResearchers;
-}
+// Step 8: Generate AI fit reasons for top researchers - Now handled by ai-evaluation module
 
 // Main API handler
 export async function POST(request: NextRequest) {
@@ -271,9 +246,26 @@ export async function POST(request: NextRequest) {
     const topCandidates = selectTopResearchers(authorsWithLocationMapped, config.researchers.topCount);
     debugLog.push(`✓ Selected top ${config.researchers.topCount} researchers`);
 
-    // Step 8: Generate AI fit reasons for top researchers
+    // Step 8: Generate AI fit reasons for top researchers using ai-evaluation module
     debugLog.push(`🤖 Step 8: Generating AI fit reasons for top ${config.researchers.topCount}...`);
-    const topResearchers = await generateFitReasons(openaiService, topCandidates, jobDescription, strategies);
+    const evaluationResults = await evaluateResearchers(
+      topCandidates,
+      jobDescription,
+      strategies
+    );
+
+    // Map evaluation results to TopResearcher format
+    const topResearchers: TopResearcher[] = evaluationResults.map((result, index) => ({
+      ...topCandidates[index],
+      aiRelevanceScore: result.score,
+      fitReason: result.reason,
+    }));
+
+    // Log any evaluation failures
+    const failures = evaluationResults.filter(r => !r.success);
+    if (failures.length > 0) {
+      debugLog.push(`⚠️  ${failures.length} evaluations used default scores due to errors`);
+    }
     debugLog.push(`✓ Generated AI analysis for all top ${config.researchers.topCount} researchers`);
 
     // Prepare additional candidates (without AI fit reasons)
