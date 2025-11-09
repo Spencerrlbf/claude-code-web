@@ -295,7 +295,7 @@ This document outlines a modular, test-driven approach to improving the codebase
 
 ---
 
-### - [ ] 3.4 Create Location Enrichment Module
+### - [x] 3.4 Create Location Enrichment Module
 **Goal:** Isolate author location enrichment logic.
 
 **What we're achieving:**
@@ -738,6 +738,6 @@ This document outlines a modular, test-driven approach to improving the codebase
 
 ## Current Status
 
-**Currently working on:** 3.4 Create Location Enrichment Module (next in Phase 3)
-**Last completed:** 3.3 Create Author Extraction Module ✅
+**Currently working on:** 3.5 Create AI Evaluation Module (next in Phase 3)
+**Last completed:** 3.4 Create Location Enrichment Module ✅
 **Last updated:** 2025-11-08

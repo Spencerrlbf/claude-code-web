@@ -17,6 +17,7 @@ import {
   executeSearchStrategies,
 } from '@/lib/core/search-strategy';
 import { matchPapers } from '@/lib/core/paper-matching';
+import { enrichWithLocation } from '@/lib/core/location-enrichment';
 
 // Step 3: Create embeddings for all paper abstracts
 async function createPaperEmbeddings(
@@ -82,24 +83,7 @@ function extractAndDeduplicateAuthors(papers: PaperWithEmbedding[]): AuthorCandi
   return Array.from(authorMap.values());
 }
 
-// Step 6: Check USA location via Semantic Scholar
-async function checkUSALocation(authors: AuthorCandidate[]): Promise<AuthorCandidate[]> {
-  console.log(`Checking location for ${authors.length} authors...`);
-
-  const enrichedAuthors = await Promise.all(
-    authors.map(async (author) => {
-      const locationData = await semanticScholarService.getAuthorLocation(author.name);
-
-      return {
-        ...author,
-        location: locationData.location as Location,
-        affiliation: locationData.affiliations[0],
-      };
-    })
-  );
-
-  return enrichedAuthors;
-}
+// Step 6: Check USA location via Semantic Scholar - Now handled by location-enrichment module
 
 // Step 7: Sort and select top N
 function selectTopResearchers(authors: AuthorCandidate[], topCount: number = config.researchers.topCount): AuthorCandidate[] {
@@ -256,15 +240,35 @@ export async function POST(request: NextRequest) {
     const allAuthors = extractAndDeduplicateAuthors(filteredPapers);
     debugLog.push(`✓ Found ${allAuthors.length} unique researchers`);
 
-    // Step 6: Check USA location
+    // Step 6: Check USA location using location-enrichment module
     debugLog.push('🌍 Step 6: Checking author locations via Semantic Scholar...');
-    const authorsWithLocation = await checkUSALocation(allAuthors);
-    const usaCount = authorsWithLocation.filter(a => a.location === 'USA').length;
-    debugLog.push(`✓ Location check complete: ${usaCount} USA-based, ${authorsWithLocation.length - usaCount} other`);
+    const { enrichedAuthors: authorsWithLocation, stats: locationStats } = await enrichWithLocation(
+      allAuthors,
+      {
+        maxConcurrent: 5,
+        timeoutMs: 5000,
+        continueOnError: true,
+      }
+    );
+
+    debugLog.push(
+      `✓ Location enrichment complete: ${locationStats.enriched}/${locationStats.total} successful ` +
+      `(${locationStats.usa} USA, ${locationStats.international} International, ${locationStats.unknown} Unknown)`
+    );
+
+    if (locationStats.failed > 0) {
+      debugLog.push(`⚠️  ${locationStats.failed} author location lookups failed but continued`);
+    }
+
+    // Map enriched authors back to AuthorCandidate format (with location and affiliation)
+    const authorsWithLocationMapped = authorsWithLocation.map(author => ({
+      ...author,
+      affiliation: author.affiliations?.[0],
+    }));
 
     // Step 7: Select top N researchers
     debugLog.push(`🏆 Step 7: Selecting top ${config.researchers.topCount} researchers (USA-prioritized)...`);
-    const topCandidates = selectTopResearchers(authorsWithLocation, config.researchers.topCount);
+    const topCandidates = selectTopResearchers(authorsWithLocationMapped, config.researchers.topCount);
     debugLog.push(`✓ Selected top ${config.researchers.topCount} researchers`);
 
     // Step 8: Generate AI fit reasons for top researchers
@@ -273,7 +277,7 @@ export async function POST(request: NextRequest) {
     debugLog.push(`✓ Generated AI analysis for all top ${config.researchers.topCount} researchers`);
 
     // Prepare additional candidates (without AI fit reasons)
-    const additionalCandidates = authorsWithLocation
+    const additionalCandidates = authorsWithLocationMapped
       .filter(a => !topCandidates.find(t => t.name === a.name))
       .slice(0, config.researchers.additionalCount);
 
